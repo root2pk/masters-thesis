@@ -1,10 +1,11 @@
 import librosa
 import librosa.display
 import soundfile as sf
-from scipy.signal.windows import get_window
 from scipy.signal import medfilt, savgol_filter, cheby2, filtfilt, find_peaks
 from scipy.optimize import curve_fit
 from scipy.ndimage import convolve1d
+from scipy.stats import skewnorm
+from scipy.special import erf
 import matplotlib.pyplot as plt
 import numpy as np
 import IPython.display as ipd
@@ -370,10 +371,10 @@ def savitsky_golay_filter(pitch_values, window_size, order):
         if len(segment) > window_size:
             # Apply Savitsky-Golay filter to the segment
             filtered_segment = savgol_filter(segment, window_size, order)
-            # Detect peaks in the original segment
-            peaks, _ = find_peaks(segment)
-            # Assign the peaks to the filtered segment
-            filtered_segment[peaks] = segment[peaks]
+            # # Detect peaks in the original segment
+            # peaks, _ = find_peaks(segment)
+            # # Assign the peaks to the filtered segment
+            # filtered_segment[peaks] = segment[peaks]
             # Assign the filtered segment to the filtered pitch contour
             filtered_pitch[seg[0]:seg[1]+1] = filtered_segment
         else:
@@ -481,64 +482,124 @@ def interval_histogram(cents, bins = 100, title = None, tuning = 'EQ'):
             plt.axvline(semitone, color='red', linestyle='--', alpha = 0.3)
     plt.show()
 
-def gaussian(x, a, b, c):
+def gaussian(x, a, b, c, d, alpha):
     """
     Gaussian function for curve fitting
 
     Parameters:
     x : np.ndarray
-        Numpy array containing the x values
+        Numpy array containing the input values
     a : float
-        Peak height
+        Amplitude of the Gaussian
     b : float
-        Peak position
+        Mean of the Gaussian
     c : float
-        Peak width
-    
+        Standard deviation of the Gaussian
+    d : float
+        Offset parameter
+    alpha : float
+        Skewness parameter, default is None
+
     Returns:
     y : np.ndarray
-        Numpy array containing the Gaussian function values
+        Numpy array containing the output values
     """
-    y = a * np.exp(-0.5 * ((x - b) / c) ** 2)
+    # Normal distribution
+    norm_dist = a * np.exp(-0.5 * ((x - b) / c) ** 2)
+    
+    # Skewness adjustment
+    if alpha is None:
+        skew_adjustment = 1
+    else:
+        skew_adjustment = skew_adjustment = (1 + erf(alpha * (x - b) / (c * np.sqrt(2))))
+    
+    # Combine both parts and add offset
+    y = norm_dist * skew_adjustment + d
 
     return y
 
-def fit_histogram(cents, bins = 1200, exp_positions = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]):
+def fit_histogram(peaks, cents, bins = 1201):
     """
-    Function to fit gaussian peaks on a histogram at given expected positions
+    Function to fit a gaussian to the histogram curve around each peak
 
     Parameters:
     cents : np.ndarray
-        Numpy array containing the cent values (Must be wrapped to the octave 0 to 1200)
+        Numpy array containing the cent values
     bins : int
-        Number of bins for the histogram, default is 1200
-    exp_positions : list
-        List of expected peak positions in cents, default is [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]
+        Number of bins for the histogram
+    peaks : list
+        List of peak positions in the histogram
 
     Returns:
-    peak_positions : np.ndarray
-        Numpy array containing the peak positions
-    peak_heights : np.ndarray
-        Numpy array containing the peak heights
-    peak_widths : np.ndarray
-        Numpy array containing the peak widths
+    peak_dict : dict
+        Dictionary containing the peak positions as keys and the gaussian parameters
     """
-    # Create histogram
+
+    bins = np.linspace(0, 1200, bins)
     hist, bin_edges = np.histogram(cents, bins = bins)
     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    # Now that peak positions are known, take the histogram curve -50 and +50 around each peak and fit a gaussian
+    peak_dict = {}
 
-    peaks, _ = find_peaks(hist)
+    for peak in peaks:
+        # Calculate start and end indices, considering wrap-around
+        start = peak - 50
+        end = peak + 50
+        
+        # Handle wrap-around for start index
+        if start < 0:
+            x_left = bin_centers[start:]  # From start index to the end
+            x_right = bin_centers[:end]  # Starting from the beginning
+            x = np.concatenate((x_left, x_right))  # Combine both parts
+            y_left = hist[start:]
+            y_right = hist[:end]
+            y = np.concatenate((y_left, y_right))
+        elif end > len(bin_centers):
+            # Handle wrap-around for end index
+            overflow = end - len(bin_centers)
+            x_left = bin_centers[start:]  # From start index to the end
+            x_right = bin_centers[:overflow]  # Starting from the beginning
+            x = np.concatenate((x_left, x_right))  # Combine both parts
+            y_left = hist[start:]
+            y_right = hist[:overflow]
+            y = np.concatenate((y_left, y_right))
+        else:
+            # No wrap-around needed
+            x = bin_centers[start:end]
+            y = hist[start:end]
+        
+        # Fit a gaussian here
+        popt, pcov = curve_fit(gaussian, x, y, p0 = [np.max(y), bin_centers[peak], 10, 1, 1])
+        peak_dict[bin_centers[peak]] = popt
 
-    # Fit Gaussian peaks
-    peak_positions = []
-    peak_heights = []
-    peak_widths = []
-    for pos in exp_positions:
-        # Fit Gaussian peaks
-        p0 = [np.max(hist), pos, 50]
-        coeff, _ = curve_fit(gaussian, bin_centers, hist, p0 = p0)
-        peak_positions.append(coeff[1])
-        peak_heights.append(coeff[0])
-        peak_widths.append(coeff[2])
+    return peak_dict
 
-    return np.array(peak_positions), np.array(peak_heights), np.array(peak_widths)
+def median_confidences(conf, voiced_segments):
+    """
+    
+    """
+    median_conf = []
+    for segment in voiced_segments:
+        median_conf.append(np.median(conf[segment[0]:segment[1]]))
+
+    return median_conf  
+
+def find_minimas(array, height):
+    """
+    Function to find the local minimas in an array
+
+    Parameters:
+    array : np.ndarray
+        Numpy array containing the input values
+    height : float
+        Minimum height of the local minimas
+
+    Returns:
+    minimas : np.ndarray
+        Numpy array containing the indices of the local minimas
+    """
+    # Find the local minimas in the array
+    minimas = find_peaks(-array, height = -height)[0]
+
+    return minimas
+
