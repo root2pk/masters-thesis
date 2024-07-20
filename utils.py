@@ -4,7 +4,7 @@ import soundfile as sf
 from scipy.signal import medfilt, savgol_filter, cheby2, filtfilt, find_peaks
 from scipy.optimize import curve_fit
 from scipy.ndimage import convolve1d
-from scipy.stats import skewnorm
+from scipy.stats import gaussian_kde
 from scipy.special import erf
 import matplotlib.pyplot as plt
 import numpy as np
@@ -69,18 +69,21 @@ def parse_pitch_file(pitch_file, confidence = False):
         pitch_confidence = None
 
     return pitch_times, pitch_values, pitch_confidence
-    """
-    Function to plot the spetrogram of the audio signal and pitch contour
-    Plot spectrogram with librosa
-    """
-    times = librosa.times_like(f0, sr=sr, hop_length=128)
-    D = librosa.amplitude_to_db(np.abs(librosa.stft(audio)), ref=np.max)
-    fig, ax = plt.subplots(figsize=(20,10))
-    img = librosa.display.specshow(D, x_axis='time', y_axis='log', ax=ax, sr = sr)
-    ax.set(title='Fundamental frequency estimation')
-    fig.colorbar(img, ax=ax, format="%+2.f dB")
-    ax.plot(times, f0, label='f0', color='cyan', linewidth=3)
-    ax.legend(loc='upper right')
+
+def merge_intervals(intervals):
+    # Step 1: Sort the intervals based on the starting point
+    intervals.sort(key=lambda x: x[0])
+    
+    merged = []
+    for interval in intervals:
+        # Step 2 & 3: If merged list is empty or current interval does not overlap
+        if not merged or merged[-1][1] < interval[0]:
+            merged.append(interval)
+        else:
+            # There is an overlap, merge the current interval with the last interval in merged
+            merged[-1] = (merged[-1][0], max(merged[-1][1], interval[1]))
+    
+    return merged
 
 def plot_pitch(pitch_values, pitch_confidence, audio, sr, threshold = 0, t1 = None, t2 = None):
     """
@@ -244,6 +247,21 @@ def save_audio(filepath, y, sr):
     sf.write(filepath, y, sr)
 
 def load_normalize(audiofile, sr = None):
+    """
+    Function to load and normalize the audio signal
+
+    Parameters:
+    audiofile : str
+        Path to the audio file
+    sr : int
+        Sampling rate, default is None
+    
+    Returns:
+    y : np.ndarray
+        Numpy array containing the audio signal
+    sr : int
+        Sampling rate of the audio signal
+    """
     # Open audio with librosa and normalize
     y, sr = librosa.load(audiofile, sr = sr)
     y = y / np.max(np.abs(y))
@@ -349,7 +367,7 @@ def gaussian_filter(pitch_values, window_size, sigma):
 
     return filtered_pitch
 
-def savitsky_golay_filter(pitch_values, window_size, order):
+def savitsky_golay_filter(pitch_values, window_size, order, peak = False):
     """
     Function to apply Savitsky-Golay filter to the pitch contour using scipy.signal.savgol_filter
     This algorithm considers voiced segments separately and applies the filter to each segment.
@@ -371,10 +389,13 @@ def savitsky_golay_filter(pitch_values, window_size, order):
         if len(segment) > window_size:
             # Apply Savitsky-Golay filter to the segment
             filtered_segment = savgol_filter(segment, window_size, order)
-            # # Detect peaks in the original segment
-            # peaks, _ = find_peaks(segment)
-            # # Assign the peaks to the filtered segment
-            # filtered_segment[peaks] = segment[peaks]
+            if peak:
+                # Detect peaks in the original segment
+                peaks, _ = find_peaks(segment)
+                minimas = find_minimas(segment, 1200)
+                # Assign the peaks to the filtered segment
+                filtered_segment[peaks] = segment[peaks]
+                filtered_segment[minimas] = segment[minimas]
             # Assign the filtered segment to the filtered pitch contour
             filtered_pitch[seg[0]:seg[1]+1] = filtered_segment
         else:
@@ -424,10 +445,9 @@ def hz_to_cents(frequencies, tonic):
     cents : np.ndarray
         Numpy array containing the cent values    
     """
-    # Ignore zero values, as they correspond to unvoiced segments
-    frequencies = frequencies[frequencies != 0]
+    # Convert 0 values to NaN
+    frequencies = np.where(frequencies==0, np.nan, frequencies)
     # Convert frequency values to cent intervals
-    frequencies = np.where(frequencies == 0, np.nan, frequencies)
     cents = 1200 * np.log2(frequencies / tonic)
 
     return cents
@@ -518,26 +538,24 @@ def gaussian(x, a, b, c, d, alpha):
 
     return y
 
-def fit_histogram(peaks, cents, bins = 1201):
+def fit_histogram(peaks, kde_vals, bin_centers):
     """
     Function to fit a gaussian to the histogram curve around each peak
 
     Parameters:
-    cents : np.ndarray
-        Numpy array containing the cent values
-    bins : int
-        Number of bins for the histogram
     peaks : list
-        List of peak positions in the histogram
+        Indices of the peaks in the histogram curve
+    kde_vals : np.ndarray
+        Numpy array containing the kernel density estimate values
+    bin_centers : np.ndarray
+        Numpy array containing the bin centers
 
     Returns:
     peak_dict : dict
         Dictionary containing the peak positions as keys and the gaussian parameters
     """
 
-    bins = np.linspace(0, 1200, bins)
-    hist, bin_edges = np.histogram(cents, bins = bins)
-    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
     # Now that peak positions are known, take the histogram curve -50 and +50 around each peak and fit a gaussian
     peak_dict = {}
 
@@ -551,8 +569,8 @@ def fit_histogram(peaks, cents, bins = 1201):
             x_left = bin_centers[start:]  # From start index to the end
             x_right = bin_centers[:end]  # Starting from the beginning
             x = np.concatenate((x_left, x_right))  # Combine both parts
-            y_left = hist[start:]
-            y_right = hist[:end]
+            y_left = kde_vals[start:]
+            y_right = kde_vals[:end]
             y = np.concatenate((y_left, y_right))
         elif end > len(bin_centers):
             # Handle wrap-around for end index
@@ -560,16 +578,16 @@ def fit_histogram(peaks, cents, bins = 1201):
             x_left = bin_centers[start:]  # From start index to the end
             x_right = bin_centers[:overflow]  # Starting from the beginning
             x = np.concatenate((x_left, x_right))  # Combine both parts
-            y_left = hist[start:]
-            y_right = hist[:overflow]
+            y_left = kde_vals[start:]
+            y_right = kde_vals[:overflow]
             y = np.concatenate((y_left, y_right))
         else:
             # No wrap-around needed
             x = bin_centers[start:end]
-            y = hist[start:end]
+            y = kde_vals[start:end]
         
         # Fit a gaussian here
-        popt, pcov = curve_fit(gaussian, x, y, p0 = [np.max(y), bin_centers[peak], 10, 1, 1])
+        popt, pcov = curve_fit(gaussian, x, y, p0 = [np.max(y), bin_centers[peak], 1, 1, 1])
         peak_dict[bin_centers[peak]] = popt
 
     return peak_dict
