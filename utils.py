@@ -324,7 +324,7 @@ def high_pass(audio, sr, cutoff, order = 4):
     # Apply high-pass filter to the audio signal
     nyquist = 0.5 * sr
     normalize_cutoff = cutoff / nyquist
-    b, a = cheby2(order, 40, normalize_cutoff, 'high', analog=False)
+    b, a = cheby2(order, 40, normalize_cutoff, 'high', analog=True)
     filtered_audio = filtfilt(b, a, audio)
 
     return filtered_audio
@@ -371,6 +371,20 @@ def savitsky_golay_filter(pitch_values, window_size, order, peak = False):
     """
     Function to apply Savitsky-Golay filter to the pitch contour using scipy.signal.savgol_filter
     This algorithm considers voiced segments separately and applies the filter to each segment.
+
+    Parameters:
+    pitch_values : np.ndarray
+        Numpy array containing the pitch values
+    window_size : int
+        Size of the window for Savitsky-Golay filter in samples
+    order : int
+        Order of the polynomial for Savitsky-Golay filter
+    peak : bool
+        Flag to assign peaks to the filtered pitch contour, default is False
+
+    Returns:
+    filtered_pitch : np.ndarray
+        Numpy array containing the filtered pitch values
     """
     # Ensure window_size is odd and > 1
     if window_size % 2 == 0 or window_size <= 1:
@@ -586,9 +600,13 @@ def fit_histogram(peaks, kde_vals, bin_centers):
             x = bin_centers[start:end]
             y = kde_vals[start:end]
         
-        # Fit a gaussian here
-        popt, pcov = curve_fit(gaussian, x, y, p0 = [np.max(y), bin_centers[peak], 1, 1, 1])
-        peak_dict[bin_centers[peak]] = popt
+        try:
+            # Fit a gaussian here
+            popt, pcov = curve_fit(gaussian, x, y, p0=[np.max(y), bin_centers[peak], 1, 1, 1])
+            peak_dict[bin_centers[peak]] = popt
+        except Exception as e:
+            print(f"Error fitting peak at index {peak}: {e}")
+            continue
 
     return peak_dict
 
@@ -620,4 +638,30 @@ def find_minimas(array, height):
     minimas = find_peaks(-array, height = -height)[0]
 
     return minimas
+
+def find_nearest_peak(peak, tuning):
+    """
+    Function to find the nearest peak in the tuning system
+
+    Parameters:
+    peak : float
+        Peak value in cents
+    tuning : str
+        Tuning system, 'EQ' for equal temperament, 'JI' for just intonation
+
+    Returns:
+    nearest_peak : float
+        Nearest peak value in cents
+    """
+    # Array containing semitone cent locations
+    EQ = np.arange(0, 1300, 100)
+    JI = np.array([0, 111, 203, 315, 386, 498, 582, 702, 814, 884, 996, 1088, 1200])
+
+    # Find the nearest peak in the tuning system
+    if tuning == 'EQ':
+        nearest_peak = EQ[np.abs(EQ - peak).argmin()]
+    elif tuning == 'JI':
+        nearest_peak = JI[np.abs(JI - peak).argmin()]
+
+    return nearest_peak
 
