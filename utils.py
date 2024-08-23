@@ -312,13 +312,12 @@ def octave_jumps(f0, voiced_segments, window_size = 20, jump_threshold = 700):
 
     return octave_jumps
 
-def correct_octave_jump(f0, merged_intervals):
+def correct_octave_jump(f0):
     """
     Corrects octave errors in the pitch contour within specified intervals.
 
     Parameters:
     f0 (np.ndarray): Array of pitch values in cents.
-    merged_intervals (list of tuples): List of tuples where each tuple contains the start and end indices of the interval with octave errors.
 
     Returns:
     np.ndarray: Corrected pitch contour in cents
@@ -688,7 +687,7 @@ def fit_histogram(peaks, kde_vals, bin_centers):
         
         try:
             # Fit a gaussian here
-            popt, pcov = curve_fit(gaussian, x, y, p0=[np.max(y), bin_centers[peak], 1, 1, 1])
+            popt, _ = curve_fit(gaussian, x, y, p0=[np.max(y), bin_centers[peak], 1, 1, 1])
             peak_dict[bin_centers[peak]] = popt
         except Exception as e:
             print(f"Error fitting peak at index {peak}: {e}")
