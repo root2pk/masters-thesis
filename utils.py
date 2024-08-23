@@ -39,38 +39,44 @@ def ms_to_samples(ms, sr):
 
     return samples
 
-def parse_pitch_file(pitch_file, confidence = False):
+def process_filename(filename):
     """
-    Function to parse the pitch file
+    Function to process the filename
 
     Parameters:
-    pitch_file : str
-        Path to the pitch file
-    confidence : bool
-        Flag to read pitch confidence values, default is False
+    filename : str
+        Filename containing the raga, piece, instrument and section information
 
     Returns:
-    pitch_times: np.ndarray
-        Numpy array containing the time values
-    pitch_values: np.ndarray
-        Numpy array containing the pitch values
-    pitch_confidence: np.ndarray
-        Numpy array containing the pitch confidence values
+    raga : str
+        Raga name
+    piece : str
+        Piece name
+    instrument : str
+        Instrument name
+    section : str
+        Section name
     """
-    # Read the pitch file
-    pitch_data = np.loadtxt(pitch_file)
+    raga = filename.split("/")[0]
+    piece = filename.split("/")[1]
+    track_info = filename.split("/")[2].split(".")[1]
+    instrument = track_info.split("-")[1]
+    section = track_info.split("-")[2] if len(track_info.split("-")) > 2 else ""
 
-    # Extract pitch times, values and confidence
-    pitch_times = pitch_data[:, 0]
-    pitch_values = pitch_data[:, 1]
-    if confidence:
-        pitch_confidence = pitch_data[:, 2]
-    else:
-        pitch_confidence = None
-
-    return pitch_times, pitch_values, pitch_confidence
+    return raga, piece, instrument, section
 
 def merge_intervals(intervals):
+    """
+    Function to merge overlapping intervals
+
+    Parameters:
+    intervals : list
+        List of tuples containing the start and end times of the intervals
+    
+    Returns:
+    merged : list
+        List of tuples containing the merged intervals
+    """
     # Step 1: Sort the intervals based on the starting point
     intervals.sort(key=lambda x: x[0])
     
@@ -268,22 +274,26 @@ def load_normalize(audiofile, sr = None):
 
     return y, sr
 
-def octave_jumps(f0, voiced_segments, window_size = 20):
+def octave_jumps(f0, voiced_segments, window_size = 20, jump_threshold = 700):
     """
     Function to detect octave jumps in the pitch contour
+    For a given window size, if the maximum pitch value changes more than the threshold cents in the window, it is considered an octave jump
 
     Parameters:
     f0 : np.ndarray
-        Numpy array containing the pitch values
+        Numpy array containing the pitch values (in cents)
     voiced_segments : list
         List of tuples containing the start and end indices of the voiced segments
     window_size : int
         Window size for detecting octave jumps, default is 20 samples (125 samples per second)
+    jump_threshold : int
+        Threshold for detecting octave jumps in cents, default is 700 cents
 
     Returns:
     octave_jumps : list
         List of tuples containing the start and end indices of the octave jumps
     """
+
     # Initialize the list of octave jumps
     octave_jumps = []
 
@@ -297,11 +307,67 @@ def octave_jumps(f0, voiced_segments, window_size = 20):
                 window = segment[i:i+window_size]
                 min_pitch = np.min(window)
                 max_pitch = np.max(window) + 1e-6
-                if max_pitch /min_pitch  >= 2:
+                if max_pitch - min_pitch > jump_threshold:
                     octave_jumps.append((seg[0] + i, seg[0] + i + window_size - 1))
 
-
     return octave_jumps
+
+def correct_octave_jump(f0, merged_intervals):
+    """
+    Corrects octave errors in the pitch contour within specified intervals.
+
+    Parameters:
+    f0 (np.ndarray): Array of pitch values in cents.
+    merged_intervals (list of tuples): List of tuples where each tuple contains the start and end indices of the interval with octave errors.
+
+    Returns:
+    np.ndarray: Corrected pitch contour in cents
+    """
+    # Create a copy of the pitch contour to avoid modifying the original array
+    corrected_f0 = f0.copy()
+    voiced = voiced_segments(corrected_f0)
+
+    # Calculate the number of octave jumps
+    jumps = octave_jumps(corrected_f0, voiced, jump_threshold = 1000)
+    merged_jumps = merge_intervals(jumps)
+    n_jumps = len(merged_jumps)
+    print("Number of octave jumps: ", n_jumps)
+
+    # Initialize the counter for constant jumps
+    constant_jump_count = 0
+
+    # Iterate until the number of jumps does not reduce
+    while True:
+        previous_n_jumps = n_jumps
+        
+        for (start_idx, end_idx) in merged_jumps:
+            f0_median = np.median(corrected_f0[start_idx:end_idx+1])
+            for i in range(start_idx, end_idx + 1):
+                if i == start_idx:
+                    # Check for octave jump at the start of the segment
+                    if np.abs(corrected_f0[i] - f0_median) > 700:
+                        corrected_f0[i] -= 1200 * np.sign(corrected_f0[i] - f0_median)
+                else:
+                    # Check for octave jump within the segment
+                    if np.abs(corrected_f0[i] - corrected_f0[i-1]) > 700:
+                        corrected_f0[i] -= 1200 * np.sign(corrected_f0[i] - corrected_f0[i-1])
+        
+        jumps = octave_jumps(corrected_f0, voiced, jump_threshold=1000)
+        merged_jumps = merge_intervals(jumps)
+        n_jumps = len(merged_jumps)
+        print(f"Number of octave jumps: {n_jumps}")
+        
+        # Check if the number of jumps has stayed constant
+        if n_jumps == previous_n_jumps:
+            constant_jump_count += 1
+        else:
+            constant_jump_count = 0
+        
+        # Break the loop if the number of jumps stays constant for 5 iterations
+        if constant_jump_count >= 5:
+            break
+
+    return corrected_f0
 
 def high_pass(audio, sr, cutoff, order = 4):
     """
@@ -459,12 +525,32 @@ def hz_to_cents(frequencies, tonic):
     cents : np.ndarray
         Numpy array containing the cent values    
     """
-    # Convert 0 values to NaN
-    frequencies = np.where(frequencies==0, np.nan, frequencies)
+    # Replace non-positive frequencies with NaN to avoid log2 issues
+    frequencies = np.where(frequencies > 0, frequencies, np.nan)
+
     # Convert frequency values to cent intervals
     cents = 1200 * np.log2(frequencies / tonic)
 
     return cents
+
+def cents_to_hz(cents, tonic):
+    """
+    Function to convert cent intervals to frequency values with respect to a tonic frequency
+
+    Parameters:
+    cents : np.ndarray
+        Numpy array containing the cent values
+    tonic : float
+        Tonic frequency in Hz
+
+    Returns:
+    frequencies : np.ndarray
+        Numpy array containing the frequency values
+    """
+    # Convert cent intervals to frequency values
+    frequencies = tonic * 2 ** (cents / 1200)
+
+    return frequencies
 
 def wrap_to_octave(cents):
     """
