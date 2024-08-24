@@ -637,7 +637,7 @@ def gaussian(x, a, b, c, d, alpha):
 
     return y
 
-def fit_histogram(peaks, kde_vals, bin_centers):
+def fit_histogram(peaks, kde_vals, bin_centers, extent = 50):
     """
     Function to fit a gaussian to the histogram curve around each peak
 
@@ -648,6 +648,7 @@ def fit_histogram(peaks, kde_vals, bin_centers):
         Numpy array containing the kernel density estimate values
     bin_centers : np.ndarray
         Numpy array containing the bin centers
+    extent: 
 
     Returns:
     peak_dict : dict
@@ -660,8 +661,8 @@ def fit_histogram(peaks, kde_vals, bin_centers):
 
     for peak in peaks:
         # Calculate start and end indices, considering wrap-around
-        start = peak - 50
-        end = peak + 50
+        start = peak - extent
+        end = peak + extent
         
         # Handle wrap-around for start index
         if start < 0:
@@ -686,8 +687,9 @@ def fit_histogram(peaks, kde_vals, bin_centers):
             y = kde_vals[start:end]
         
         try:
-            # Fit a gaussian here
-            popt, _ = curve_fit(gaussian, x, y, p0=[np.max(y), bin_centers[peak], 1, 1, 1])
+            # Fit a gaussian to the curve
+            initial_guess = [np.max(y), bin_centers[peak], 1, 1, 1]
+            popt, _ = curve_fit(gaussian, x, y, p0=initial_guess)
             peak_dict[bin_centers[peak]] = popt
         except Exception as e:
             print(f"Error fitting peak at index {peak}: {e}")

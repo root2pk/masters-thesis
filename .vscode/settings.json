@@ -1,5 +1,6 @@
 {
     "python.analysis.extraPaths": [
         "./software/models"
-    ]
+    ],
+    "explorer.sortOrder": "type"
 }
