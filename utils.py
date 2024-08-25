@@ -4,7 +4,7 @@ import soundfile as sf
 from scipy.signal import medfilt, savgol_filter, cheby2, filtfilt, find_peaks
 from scipy.optimize import curve_fit
 from scipy.ndimage import convolve1d
-from scipy.stats import gaussian_kde
+from scipy import stats
 from scipy.special import erf
 import matplotlib.pyplot as plt
 import numpy as np
@@ -752,3 +752,79 @@ def find_nearest_peak(peak, tuning):
 
     return nearest_peak
 
+def t_test(kde_1, kde_2, **kwargs):
+    """
+    Function to perform a t-test between two kernel density estimates
+
+    Parameters:
+    kde_1 : np.ndarray
+        Numpy array containing the kernel density estimate values for the first distribution
+    kde_2 : np.ndarray
+        Numpy array containing the kernel density estimate values for the second distribution
+    **kwargs : dict
+        Additional keyword arguments for scipy.stats.ttest_ind
+
+    Returns:
+    t_stat : float
+        T-statistic value
+    p_value : float
+        P-value
+    """
+    # Check if the variance is equal, else set equal_var = False
+    if not stats.levene(kde_1, kde_2)[1] < 0.05:
+        kwargs['equal_var'] = True
+        print("Variance is equal, using equal variance t-test")
+    else:
+        print("Variance is not equal, using Welch's t-test")
+        kwargs['equal_var'] = False
+
+    # Perform a t-test between the two distributions
+    t_stat, p_value = stats.ttest_ind(kde_1, kde_2, **kwargs)
+
+    return t_stat, p_value
+
+def mann_whitney_u(kde_1, kde_2, **kwargs):
+    """
+    Function to perform a Mann-Whitney U test between two kernel density estimates
+
+    Parameters:
+    kde_1 : np.ndarray
+        Numpy array containing the kernel density estimate values for the first distribution
+    kde_2 : np.ndarray
+        Numpy array containing the kernel density estimate values for the second distribution
+    **kwargs : dict
+        Additional keyword arguments for scipy.stats.mannwhitneyu
+
+    Returns:
+    u_stat : float
+        U-statistic value
+    p_value : float
+        P-value
+    """
+    # Perform a Mann-Whitney U test between the two distributions
+    u_stat, p_value = stats.mannwhitneyu(kde_1, kde_2, **kwargs)
+
+    return u_stat, p_value
+
+def cross_entropy(p, q):
+    """
+    Function to calculate the cross-entropy between two probability distributions
+
+    Parameters:
+    p : np.ndarray
+        Numpy array containing the first probability distribution
+    q : np.ndarray
+        Numpy array containing the second probability distribution
+
+    Returns:
+    cross_entropy : float
+        Cross-entropy value
+    """
+    # Normalize the distributions
+    p = p / np.sum(p)
+    q = q / np.sum(q)
+
+    # Calculate the cross-entropy between the two distributions
+    cross_entropy = -np.sum(p * np.log(q + 1e-6))
+
+    return cross_entropy
