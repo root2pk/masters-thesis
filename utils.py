@@ -5,6 +5,7 @@ from scipy.signal import medfilt, savgol_filter, cheby2, filtfilt, find_peaks
 from scipy.optimize import curve_fit
 from scipy.ndimage import convolve1d
 from scipy import stats
+from scipy.stats import gaussian_kde
 from scipy.special import erf
 import matplotlib.pyplot as plt
 import numpy as np
