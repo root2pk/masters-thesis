@@ -1,0 +1,8 @@
+librosa
+soundfile
+scipy
+matplotlib
+numpy
+IPython
+mir_eval
+essentia

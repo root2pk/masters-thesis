@@ -1,13 +1,12 @@
 import librosa
 import librosa.display
 import soundfile as sf
-from scipy.signal import medfilt, savgol_filter, cheby2, filtfilt, find_peaks
+from scipy.signal import savgol_filter, cheby2, filtfilt, find_peaks
 from scipy.optimize import curve_fit
 from scipy.ndimage import convolve1d
 from scipy import stats
 from scipy.stats import gaussian_kde
 from scipy.special import erf
-import matplotlib.pyplot as plt
 import numpy as np
 import IPython.display as ipd
 import mir_eval
@@ -92,54 +91,6 @@ def merge_intervals(intervals):
     
     return merged
 
-def plot_pitch(pitch_values, pitch_confidence, audio, sr, threshold = 0, t1 = None, t2 = None):
-    """
-    Function to plot pitch values and confidence
-
-    Parameters:
-    pitch_values : np.ndarray
-        Numpy array containing the pitch values
-    pitch_confidence : np.ndarray
-        Numpy array containing the pitch confidence values
-    audio : np.ndarray
-        Numpy array containing the audio signal
-    sr : int
-        Sampling rate of the audio signal
-    threshold : float
-        Threshold for pitch confidence values
-    t1 : float
-        Start time for plotting (in seconds)
-    t2 : float
-        End time for plotting (in seconds)
-
-    Returns:
-    None
-    """
-    pitch_times = np.linspace(0.0,len(audio)/sr,len(pitch_values))
-
-    # Clean up pitch values and confidences
-    pitch_values[pitch_confidence < threshold] = 0
-    pitch_values = np.where(pitch_values==0, np.nan, pitch_values)
-    pitch_confidence = np.where(pitch_confidence==0, np.nan, pitch_confidence)
-
-    # Plot pitch values and confidence in subplots
-    plt.figure(figsize=(12, 6))
-    plt.subplot(2,1,1)
-    plt.plot(pitch_times, pitch_values)
-    plt.title('Estimated Pitch')
-    plt.ylabel('Frequency (Hz)')
-    if t1 is not None and t2 is not None:
-        plt.xlim(t1, t2)
-    plt.subplot(2,1,2)
-    plt.scatter(pitch_times, pitch_confidence, s = 1, color='red')
-    plt.title('Pitch Confidence')
-    plt.ylabel('Confidence')
-    plt.xlabel('Time (s)')
-    if t1 is not None and t2 is not None:
-        plt.xlim(t1, t2)
-    plt.tight_layout()
-    plt.show()
-
 def display_audio(audio, sr):
     ipd.display(ipd.Audio(audio, rate=sr))
 
@@ -192,29 +143,6 @@ def melodia(audio, sr, **kwargs):
     pitch_values, pitch_confidence = pitch_extractor(audio)
 
     return pitch_values, pitch_confidence
-
-def pyin(audio, sr, fmin = 180, fmax = 2000):
-    f0, _, voiced_probs = librosa.pyin(audio, fmin=fmin, fmax=fmax, sr=sr)
-    
-    return f0, voiced_probs
-
-def pitch_histogram(pitch_values, bins = 100, title = None):
-    
-    # Convert 0 values to NaN
-    pitch_values = np.where(pitch_values==0, np.nan, pitch_values)
-
-    # Count how many values are not NaN
-    count = np.count_nonzero(~np.isnan(pitch_values))
-    
-    # Plot the histogram of pitch values
-    plt.figure(figsize=(20,10))
-    plt.hist(pitch_values, bins = bins, color='cyan')
-    plt.xlabel('Frequency (Hz)')
-    plt.ylabel('Count')
-    plt.title(title)
-    plt.show()
-
-    return count
 
 def sonify_pitch_contour(time, pitch, sr=16000, display = False):
     """
@@ -395,21 +323,6 @@ def high_pass(audio, sr, cutoff, order = 4):
 
     return filtered_audio
 
-def median_filter(pitch_values, window_size):
-    """
-    Function to apply median filter to the pitch contour using scipy.signal.medfilt
-
-    Parameters:
-    pitch_values : np.ndarray
-        Numpy array containing the pitch values
-    window_size : int
-        Size of the window for median filter in samples
-    """
-    # Apply median filter to the pitch contour
-    filtered_pitch = medfilt(pitch_values, window_size)
-
-    return filtered_pitch
-
 def gaussian_filter(pitch_values, window_size, sigma):
     """
     Function to apply Gaussian filter to the pitch contour using scipy.ndimage.gaussian_filter1d
@@ -568,40 +481,7 @@ def wrap_to_octave(cents):
     wrapped_cents = np.mod(cents, 1200)
 
     return wrapped_cents
-
-def interval_histogram(cents, bins = 100, title = None, tuning = 'EQ'):
-    """
-    Function to plot the histogram of cent values
-
-    Parameters:
-    cents : np.ndarray
-        Numpy array containing the cent values
-    bins : int
-        Number of bins for the histogram
-    title : str
-        Title of the histogram plot
-    tuning : str
-        Tuning system, 'EQ' for equal temperament, 'JI' for just intonation, default is 'EQ'
-    """
-    # Array containing semitone cent locations
-    EQ = np.arange(0, 1300, 100)
-    JI = np.array([0, 111, 203, 315, 386, 498, 582, 702, 814, 884, 996, 1088, 1200])
-    # Plot the histogram of cent values
-    plt.figure(figsize=(20,10))
-    plt.hist(cents, bins = bins, color='cyan')
-    plt.xlabel('Cents')
-    plt.ylabel('Count')
-    plt.title(title)
-
-    # Add vertical lines for each semitone location
-    if tuning == 'EQ':
-        for semitone in EQ:
-            plt.axvline(semitone, color='red', linestyle='--', alpha = 0.3)
-    elif tuning == 'JI':
-        for semitone in JI:
-            plt.axvline(semitone, color='red', linestyle='--', alpha = 0.3)
-    plt.show()
-
+    
 def gaussian(x, a, b, c, d, alpha):
     """
     Gaussian function for curve fitting
@@ -700,7 +580,17 @@ def fit_histogram(peaks, kde_vals, bin_centers, extent = 50):
 
 def median_confidences(conf, voiced_segments):
     """
+    Function to calculate the median confidence values for each voiced segment
+
+    Parameters:
+    conf : np.ndarray
+        Numpy array containing the confidence values
+    voiced_segments : list
+        List of tuples containing the start and end indices of the voiced segments
     
+    Returns:
+    median_conf : list
+        List containing the median confidence values for each voiced segment
     """
     median_conf = []
     for segment in voiced_segments:
@@ -727,31 +617,7 @@ def find_minimas(array, height):
 
     return minimas
 
-def find_nearest_peak(peak, tuning):
-    """
-    Function to find the nearest peak in the tuning system
-
-    Parameters:
-    peak : float
-        Peak value in cents
-    tuning : str
-        Tuning system, 'EQ' for equal temperament, 'JI' for just intonation
-
-    Returns:
-    nearest_peak : float
-        Nearest peak value in cents
-    """
-    # Array containing semitone cent locations
-    EQ = np.arange(0, 1300, 100)
-    JI = np.array([0, 111, 203, 315, 386, 498, 582, 702, 814, 884, 996, 1088, 1200])
-
-    # Find the nearest peak in the tuning system
-    if tuning == 'EQ':
-        nearest_peak = EQ[np.abs(EQ - peak).argmin()]
-    elif tuning == 'JI':
-        nearest_peak = JI[np.abs(JI - peak).argmin()]
-
-    return nearest_peak
+####################### Statistical Analysis #######################
 
 def t_test(kde_1, kde_2, **kwargs):
     """
