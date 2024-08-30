@@ -26,6 +26,7 @@ This analysis makes use of selected tracks from the [Saraga Carnatic dataset](ht
 ## Models
 
 ### Essentia Melodia model
-This model utilizes the Melodia predominant pitch extraction model from Essentia to compute pitch contours.
+This model utilizes the Melodia predominant pitch extraction and the `TonicIndianArtMusic` algorithms from Essentia to compute pitch contours and tonic, respectively,
 
 [J. Salamon and E. Gomez, "Melody Extraction From Polyphonic Music Signals Using Pitch Contour Characteristics," in IEEE Transactions on Audio, Speech, and Language Processing, vol. 20, no. 6, pp. 1759-1770, Aug. 2012](https://ieeexplore.ieee.org/document/6155601)
+[J. Salamon, S. Gulati, and X. Serra, “A Multipitch Approach to Tonic Identification in Indian Classical Music,” in International Society for Music Information Retrieval Conference (ISMIR’12), 2012](https://repositori.upf.edu/handle/10230/22735)
